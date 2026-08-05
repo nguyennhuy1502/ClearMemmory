@@ -110,6 +110,12 @@ def _windows():
     return os.environ.get("SystemRoot") or os.environ.get("WINDIR") or r"C:\Windows"
 
 
+def _is_safe_service_name(name):
+    """Kiểm tra tên service chỉ chứa ký tự an toàn (chống command injection)."""
+    import re
+    return bool(re.match(r'^[a-zA-Z0-9_\-. ]+$', name))
+
+
 # ============================ Các mục quét bảo mật ============================
 
 def check_defender():
@@ -552,23 +558,344 @@ def check_browser_extensions():
     return items
 
 
+# ============================ CÁC CHECK NÂNG CAO (deep) ============================
+
+def check_windows_update():
+    """Kiểm tra Windows Update có cập nhật chưa cài / đã lâu."""
+    items = []
+    # LastSuccessTime / PendingReboot qua registry WindowsUpdate
+    last = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install",
+                      "LastErrorTime", winreg.HKEY_LOCAL_MACHINE)
+    # Pending reboot do update?
+    pending = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing",
+                         "RebootPending", winreg.HKEY_LOCAL_MACHINE)
+    if pending is not None:
+        items.append(("Cập nhật chờ khởi động lại", "Có update pending — nên reboot", "medium"))
+    # Kiểm tra service wuauserv
+    out = _run('sc query wuauserv 2>&1 | findstr /i "STATE"')
+    if "RUNNING" in out.upper():
+        items.append(("Dịch vụ Windows Update", "Đang chạy", "ok"))
+    else:
+        items.append(("Dịch vụ Windows Update", "Không chạy (có thể bị tắt)", "info"))
+    # Số bản patch gần đây qua PowerShell (nhanh, timeout thấp)
+    out = _run('powershell -NoProfile -Command "(Get-HotFix | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn" 2>$null', timeout=12)
+    out = out.strip()
+    if out and out.lower() != "null":
+        items.append(("Bản patch mới nhất", out, "info"))
+    if not items:
+        items.append(("Windows Update", "Không đọc được chi tiết", "info"))
+    return items
+
+
+def check_smartscreen():
+    """SmartScreen (chặn app không rõ nguồn)."""
+    items = []
+    # Explorer + SmartScreen registry
+    val = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
+                     "SmartScreenEnabled", winreg.HKEY_CURRENT_USER)
+    levels = {"on": "ok", "warn": "medium", "off": "high"}
+    if val is None:
+        val = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer",
+                         "SmartScreenEnabled", winreg.HKEY_LOCAL_MACHINE)
+    if val:
+        lvl = levels.get(str(val).lower(), "info")
+        items.append(("SmartScreen (Explorer)", str(val), lvl))
+    else:
+        items.append(("SmartScreen", "Không đọc được cấu hình", "info"))
+    return items
+
+
+def check_powershell_policy():
+    """ExecutionPolicy — Restricted/AllSigned là an toàn; Unrestricted/Bypass nguy hiểm."""
+    items = []
+    out = _run('powershell -NoProfile -Command "Get-ExecutionPolicy" 2>$null', timeout=10)
+    pol = out.strip().lower()
+    risky = {"unrestricted": "high", "bypass": "high", "remotesigned": "medium"}
+    safe = {"restricted": "ok", "allsigned": "ok"}
+    if pol in risky:
+        items.append(("PowerShell ExecutionPolicy", pol.upper() + " (nguy hiểm)", risky[pol]))
+    elif pol in safe:
+        items.append(("PowerShell ExecutionPolicy", pol.upper(), "ok"))
+    elif pol:
+        items.append(("PowerShell ExecutionPolicy", pol, "info"))
+    else:
+        items.append(("PowerShell ExecutionPolicy", "Không đọc được", "info"))
+    return items
+
+
+def check_smb_v1():
+    """SMBv1 (lỗ hổng WannaCry/EternalBlue) phải TẮT."""
+    items = []
+    out = _run('powershell -NoProfile -Command "(Get-WindowsOptionalFeature -Online -FeatureName SMB1Protocol 2>$null).State" 2>$null', timeout=15)
+    state = out.strip().lower()
+    if state == "enabled":
+        items.append(("SMBv1 protocol", "BẬT — NGUY HIỂM (WannaCry/EternalBlue)", "high"))
+    elif state == "disabled":
+        items.append(("SMBv1 protocol", "Đã tắt (an toàn)", "ok"))
+    else:
+        # Fallback: registry
+        val = _reg_value(r"SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters",
+                         "SMB1", winreg.HKEY_LOCAL_MACHINE)
+        if val == 0:
+            items.append(("SMBv1 (registry)", "Đã tắt", "ok"))
+        elif val == 1:
+            items.append(("SMBv1 (registry)", "BẬT — NGUY HIỂM", "high"))
+        else:
+            items.append(("SMBv1 protocol", "Không xác định trạng thái", "info"))
+    return items
+
+
+def check_scheduled_tasks_suspicious():
+    """Scheduled Task nghi ngờ: chạy script từ Temp/AppData, hoặc tên ngẫu nhiên."""
+    items = []
+    out = _run('schtasks /query /fo csv /nh 2>nul', timeout=15)
+    suspects = []
+    for line in out.splitlines():
+        # csv: "TaskName","NextRun","Status","Mode",...
+        parts = line.split('","')
+        if len(parts) < 2:
+            continue
+        name = parts[0].strip('"').lower()
+        full = line.lower()
+        # Heuristic: action chứa temp/appdata/powershell -enc
+        if any(k in full for k in ("\\temp\\", "%temp%", "\\appdata\\",
+                                   "powershell -enc", "powershell -e ",
+                                   "powershell -w hidden", "downloadstring")):
+            suspects.append(parts[0].strip('"'))
+        if len(suspects) >= 10:
+            break
+    if suspects:
+        items.append(("Scheduled Task nghi ngờ", f"{len(suspects)} task khả nghi", "high"))
+        for s in suspects[:8]:
+            items.append(("  task", s, "high"))
+    else:
+        items.append(("Scheduled Tasks", "Không phát hiện task khả nghi", "ok"))
+    return items
+
+
+def check_llmnr_nbtns():
+    """LLMNR/NBT-NS (vector poisoning/spoofing nội bộ) nên tắt."""
+    items = []
+    # LLMNR: HKLM\...\DNSclient\Parameters EnableMulticast = 0 (disabled)
+    llmnr = _reg_value(r"SYSTEM\CurrentControlSet\Services\Dnscache\Parameters",
+                       "EnableMulticast", winreg.HKEY_LOCAL_MACHINE)
+    if llmnr == 0:
+        items.append(("LLMNR", "Đã tắt (an toàn)", "ok"))
+    elif llmnr == 1:
+        items.append(("LLMNR", "BẬT — có thể bị poisoning", "medium"))
+    else:
+        items.append(("LLMNR", "Mặc định (bật) — nên tắt", "medium"))
+    # NetBIOS over TCP/IP
+    nb = _reg_value(r"SYSTEM\CurrentControlSet\Services\NetBT\Parameters",
+                    "EnableLMHOSTS", winreg.HKEY_LOCAL_MACHINE)
+    if nb == 0:
+        items.append(("NetBIOS LMHOSTS", "Đã tắt (an toàn)", "ok"))
+    elif nb == 1:
+        items.append(("NetBIOS LMHOSTS", "Bật — vector spoofing", "low"))
+    return items
+
+
+def check_rdp_nla():
+    """RDP Network Level Authentication phải bật (chống BlueKeep/brute-force)."""
+    items = []
+    val = _reg_value(r"SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp",
+                     "UserAuthentication", winreg.HKEY_LOCAL_MACHINE)
+    fdeny = _reg_value(r"SYSTEM\CurrentControlSet\Control\Terminal Server",
+                       "fDenyTSConnections", winreg.HKEY_LOCAL_MACHINE)
+    if fdeny == 0:  # RDP đang bật
+        if val == 1:
+            items.append(("RDP NLA", "Bật (an toàn)", "ok"))
+        elif val == 0:
+            items.append(("RDP NLA", "TẮT — RDP mở mà không có NLA (nguy hiểm)", "high"))
+        else:
+            items.append(("RDP NLA", "Không xác định", "medium"))
+    else:
+        items.append(("RDP NLA", "RDP đã tắt", "ok"))
+    return items
+
+
+def check_lsass_protection():
+    """LSASS protection (RunAsPPL) — chống credential dumping (Mimikatz)."""
+    items = []
+    val = _reg_value(r"SYSTEM\CurrentControlSet\Control\Lsa",
+                     "RunAsPPL", winreg.HKEY_LOCAL_MACHINE)
+    if val == 1:
+        items.append(("LSASS Protection (RunAsPPL)", "Bật (chống Mimikatz)", "ok"))
+    elif val == 0:
+        items.append(("LSASS Protection (RunAsPPL)", "Tắt — dễ bị dump credential", "high"))
+    else:
+        items.append(("LSASS Protection", "Không xác định (thường = tắt)", "medium"))
+    # Credential Guard
+    cg = _reg_value(r"SYSTEM\CurrentControlSet\Control\LSA",
+                    "LsaCfgFlags", winreg.HKEY_LOCAL_MACHINE)
+    if cg == 1:
+        items.append(("Credential Guard", "Bật (chống pass-the-hash)", "ok"))
+    elif cg == 0:
+        items.append(("Credential Guard", "Tắt", "medium"))
+    return items
+
+
+def check_third_party_services():
+    """Dịch vụ tự khởi động không phải Microsoft — khả năng malware persistence."""
+    items = []
+    # Liệt kê service (list form, KHÔNG shell → không injection)
+    out = _run_list(["sc", "query", "state=", "all"], timeout=12)
+    names = []
+    for line in out:
+        s = line.strip()
+        if s.upper().startswith("SERVICE_NAME:"):
+            names.append(s.split(":", 1)[1].strip())
+    # Lọc các service có binary path nghi. Gọi sc qc dạng LIST (không shell, không f-string sink)
+    # để loại bỏ hoàn toàn nguy cơ command injection qua tên service.
+    suspects = 0
+    checked = 0
+    for n in names[:200]:
+        checked += 1
+        # Tên service có thể chứa ký tự lạ → _safe_service_name chặn trước
+        if not _is_safe_service_name(n):
+            continue
+        qc_lines = _run_list(["sc", "qc", n], timeout=3)
+        binline = ""
+        for ln in qc_lines:
+            if "BINARY_PATH_NAME" in ln.upper():
+                binline = ln
+                break
+        low = binline.lower()
+        if any(k in low for k in ("\\temp\\", "%temp%", "\\appdata\\", "users\\public\\",
+                                   "powershell", "wscript", "cmd.exe /c")):
+            suspects += 1
+            if suspects <= 8:
+                items.append(("  service nghi", f"{n}: {binline.strip()[:90]}", "high"))
+        if checked >= 200:
+            break
+    if suspects == 0:
+        items.append(("Dịch vụ tự khởi động", "Không phát hiện service nghi", "ok"))
+    else:
+        items.insert(0, ("Dịch vụ tự khởi động nghi ngờ", f"{suspects} service khả nghi", "high"))
+    return items
+
+
+def check_user_account_control_smart():
+    """Kiểm tra chi tiết UAC: EnableLUA + modalità notifies."""
+    items = []
+    enable_lua = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+                            "EnableLUA", winreg.HKEY_LOCAL_MACHINE)
+    if enable_lua == 0:
+        items.append(("UAC EnableLUA", "TẮT hoàn toàn — NGUY HIỂM", "high"))
+    elif enable_lua == 1:
+        items.append(("UAC EnableLUA", "Bật", "ok"))
+    # VirtualizeDesktopWrites — sandbox cho app legacy
+    vd = _reg_value(r"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System",
+                    "EnableVirtualization", winreg.HKEY_LOCAL_MACHINE)
+    if vd == 0:
+        items.append(("UAC Virtualization", "Tắt", "low"))
+    return items
+
+
+def check_windows_defender_exclusions():
+    """Exclusion paths trong Defender — attacker thường thêm để lách quét."""
+    items = []
+    out = _run('powershell -NoProfile -Command "(Get-MpPreference 2>$null).ExclusionPath" 2>$null', timeout=12)
+    paths = [p.strip() for p in out.splitlines() if p.strip()]
+    out2 = _run('powershell -NoProfile -Command "(Get-MpPreference 2>$null).ExclusionProcess" 2>$null', timeout=12)
+    procs = [p.strip() for p in out2.splitlines() if p.strip()]
+    out3 = _run('powershell -NoProfile -Command "(Get-MpPreference 2>$null).ExclusionExtension" 2>$null', timeout=12)
+    exts = [p.strip() for p in out3.splitlines() if p.strip()]
+    total = len(paths) + len(procs) + len(exts)
+    if total == 0:
+        items.append(("Defender Exclusions", "Không có exclusion", "ok"))
+    else:
+        items.append(("Defender Exclusions", f"{total} exclusion — kiểm tra", "medium"))
+        for p in paths[:5]:
+            items.append(("  path", p, "medium"))
+        for p in procs[:3]:
+            items.append(("  process", p, "medium"))
+        for e in exts[:3]:
+            items.append(("  extension", e, "high"))
+    return items
+
+
+def check_wifi_profiles_saved():
+    """SSID đã lưu — rò rỉ thông tin vị trí/lịch sử, có thể bị khai thác."""
+    items = []
+    out = _run('netsh wlan show profiles 2>nul', timeout=10)
+    profiles = []
+    for line in out.splitlines():
+        low = line.lower()
+        if "all users profile" in low or "user profile" in low:
+            try:
+                name = line.split(":", 1)[1].strip()
+                if name:
+                    profiles.append(name)
+            except IndexError:
+                pass
+    if profiles:
+        level = "medium" if len(profiles) > 10 else "info"
+        items.append(("Wi-Fi profiles đã lưu", f"{len(profiles)} SSID", level))
+        for p in profiles[:6]:
+            items.append(("  SSID", p, "info"))
+    else:
+        items.append(("Wi-Fi profiles", "Không có", "ok"))
+    return items
+
+
+def check_admin_accounts_count():
+    """Số tài khoản admin cục bộ — quá nhiều = tăng bề mặt tấn công."""
+    items = []
+    out = _run('net localgroup administrators 2>nul', timeout=8)
+    admins = []
+    for line in out.splitlines():
+        s = line.strip()
+        if s and not s.startswith("The") and not s.startswith("Alias") and \
+           not s.startswith("Comment") and not s.startswith("---") and \
+           not s.startswith("Members") and s.lower() not in ("administrator",) and \
+           "check" not in s.lower() and "completed" not in s.lower():
+            if not s.startswith("$"):
+                admins.append(s)
+    # Lọc dấu phân cách cuối
+    admins = [a for a in admins if "command" not in a.lower()]
+    if len(admins) == 0:
+        # Có thể chỉ có Administrator mặc định
+        items.append(("Tài khoản Admin cục bộ", "1 (mặc định)", "ok"))
+    elif len(admins) <= 2:
+        items.append(("Tài khoản Admin cục bộ", f"{len(admins)} tài khoản", "ok"))
+    else:
+        items.append(("Tài khoản Admin cục bộ", f"{len(admins)} tài khoản — nên giảm", "medium"))
+        for a in admins[:8]:
+            items.append(("  admin", a, "info"))
+    return items
+
+
 # ============================ Tổng hợp ============================
 SECURITY_CHECKS = [
     ("🛡️ Antivirus / Windows Defender", check_defender),
+    ("🧹 Defender Exclusions (lách quét)", check_windows_defender_exclusions),
     ("🔥 Firewall", check_firewall),
     ("🔐 UAC (User Account Control)", check_uac),
+    ("🔐 UAC chi tiết (EnableLUA/Virtualization)", check_user_account_control_smart),
     ("🔑 Mật khẩu người dùng", check_passwords),
     ("🌐 Mật khẩu trình duyệt", check_browser_passwords),
     ("🚀 Chương trình tự khởi động", check_startup),
+    ("⚙️ Dịch vụ tự khởi động nghi ngờ", check_third_party_services),
     ("🖥️ Remote Desktop", check_rdp_logs),
+    ("🛡️ RDP NLA (Network Level Auth)", check_rdp_nla),
+    ("🔒 LSASS Protection & Credential Guard", check_lsass_protection),
     ("⚠️ Tệp thực thi nghi ngờ (Temp)", check_suspicious_executables),
+    ("📅 Scheduled Tasks nghi ngờ", check_scheduled_tasks_suspicious),
     ("🌐 Cổng mạng đang mở", check_open_ports),
+    ("📡 LLMNR / NetBIOS (poisoning)", check_llmnr_nbtns),
     ("📦 Phần mềm cũ", check_old_software),
-    ("📁 Chia sẻ mạng", check_network_shares),
+    ("🔄 Windows Update", check_windows_update),
+    ("🗂️ Chia sẻ mạng", check_network_shares),
     ("🔑 Auto Logon", check_autologon),
-    ("🔒 BitLocker", check_bitlocker),
+    ("🔐 BitLocker", check_bitlocker),
     ("📜 Hosts file bất thường", check_hosts_file),
     ("🧩 Tiện ích trình duyệt (extensions)", check_browser_extensions),
+    ("🛡️ SmartScreen", check_smartscreen),
+    ("⚡ PowerShell ExecutionPolicy", check_powershell_policy),
+    ("💥 SMBv1 (WannaCry/EternalBlue)", check_smb_v1),
+    ("👥 Tài khoản Admin cục bộ", check_admin_accounts_count),
+    ("📶 Wi-Fi profiles đã lưu", check_wifi_profiles_saved),
 ]
 
 
