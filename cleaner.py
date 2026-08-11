@@ -679,9 +679,9 @@ class CleanerApp:
         self.tree.column("files", width=60, anchor="e", stretch=False)
         self.tree.column("status", width=180, anchor="w", stretch=False)
 
-        self.tree.tag_configure("selected", background="#cce8ff")
-        self.tree.tag_configure("unselected", background="white")
-        self.tree.tag_configure("needs_admin", background="#fff5e6")
+        self.tree.tag_configure("selected",    background="#cce8ff", foreground="#0d3a6e")
+        self.tree.tag_configure("unselected",  background="#f7f7f7", foreground="#1a1a1a")
+        self.tree.tag_configure("needs_admin", background="#fff3d6", foreground="#5c4500")
 
         vsb = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=vsb.set)
