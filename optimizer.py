@@ -21,12 +21,24 @@ Hành động (gọi khi user bấm):
   clear_clipboard()        — xóa clipboard
   toggle_startup(...)      — bật/tắt mục startup
   apply_tweak(...)        — áp dụng tweak hệ thống
+
+Nhóm tối ưu chuyên sâu (mới):
+  list_services()          — liệt kê bloatware services (DiagTrack, Xbox...)
+  toggle_service(...)      — bật/tắt service (sc config + stop/start, no shell)
+  privacy_tweaks()         — 5 tweaks privacy (Cortana, Telemetry, AdID...)
+  network_status()         — TCP autotuning, RSS, LMHOSTS
+  network_actions()        — flush DNS, reset Winsock, TCP auto-tune...
+  disk_optimization_info() — per-drive SSD/HDD status
+  run_trim_all()           — TRIM tất cả SSD
+  run_defrag(drive)        — defrag HDD
+  run_disk_cleanup()       — gọi cleanmgr dọn sâu
 """
 
 import os
 import ctypes
 import subprocess
 import winreg
+import hashlib
 
 try:
     import psutil
@@ -432,6 +444,384 @@ def suggested_tweaks():
     return tweaks
 
 
+# ============================ Privacy / Telemetry tweaks ============================
+def privacy_tweaks():
+    """Trả về list dict cấu trúc giống suggested_tweaks — riêng nhóm Privacy."""
+    tweaks = []
+
+    # 1. Tắt Cortana (HKLM policy)
+    def _cortana_applied():
+        v1 = _reg_get_dword(r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                            "AllowCortana")
+        return v1 == 0
+
+    def _cortana_apply():
+        ok1 = _reg_set_dword(r"SOFTWARE\Policies\Microsoft\Windows\Windows Search",
+                             "AllowCortana", 0)
+        return ok1
+
+    tweaks.append({
+        "id": "disable_cortana",
+        "name_vi": "Tắt Cortana",
+        "name_en": "Disable Cortana",
+        "desc_vi": "Vô hiệu hóa trợ lý ảo Cortana (tiết kiệm RAM)",
+        "desc_en": "Disable Cortana virtual assistant (saves RAM)",
+        "needs_admin": True,
+        "risk": "low",
+        "is_applied": _cortana_applied(),
+        "fn": _cortana_apply,
+    })
+
+    # 2. Tắt Telemetry (Compatibility telemetry)
+    def _telem_applied():
+        v = _reg_get_dword(r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+                           "AllowTelemetry")
+        return v == 0
+
+    tweaks.append({
+        "id": "disable_telemetry",
+        "name_vi": "Tắt Telemetry (thu thập dữ liệu)",
+        "name_en": "Disable Telemetry",
+        "desc_vi": "Giới hạn Windows thu thập dữ liệu sử dụng — tăng privacy",
+        "desc_en": "Limit Windows usage data collection — better privacy",
+        "needs_admin": True,
+        "risk": "low",
+        "is_applied": _telem_applied(),
+        "fn": lambda: _reg_set_dword(
+            r"SOFTWARE\Policies\Microsoft\Windows\DataCollection",
+            "AllowTelemetry", 0),
+    })
+
+    # 3. Tắt Advertising ID
+    def _adid_applied():
+        v = _reg_get_dword(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingPlatform",
+            "Enabled", winreg.HKEY_CURRENT_USER)
+        return v == 0
+
+    tweaks.append({
+        "id": "disable_advertising_id",
+        "name_vi": "Tắt Advertising ID",
+        "name_en": "Disable Advertising ID",
+        "desc_vi": "Ngăn app dùng ID quảng cáo để theo dõi thói quen",
+        "desc_en": "Stop apps using advertising ID for tracking",
+        "needs_admin": False,
+        "risk": "low",
+        "is_applied": _adid_applied(),
+        "fn": lambda: _reg_set_dword(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\AdvertisingPlatform",
+            "Enabled", 0, winreg.HKEY_CURRENT_USER),
+    })
+
+    # 4. Tắt Input Personalization (typing/inking telemetry)
+    def _input_applied():
+        v = _reg_get_dword(
+            r"SOFTWARE\Microsoft\InputPersonalization",
+            "RestrictImplicitTextCollection", winreg.HKEY_CURRENT_USER)
+        return v == 1
+
+    def _input_apply():
+        base = r"SOFTWARE\Microsoft\InputPersonalization"
+        ok1 = _reg_set_dword(base, "RestrictImplicitInkCollection", 1,
+                             winreg.HKEY_CURRENT_USER)
+        ok2 = _reg_set_dword(base, "RestrictImplicitTextCollection", 1,
+                             winreg.HKEY_CURRENT_USER)
+        ok3 = _reg_set_dword(base + r"\TrainedDataStore",
+                             "HarvestContacts", 0, winreg.HKEY_CURRENT_USER)
+        return ok1 or ok2 or ok3
+
+    tweaks.append({
+        "id": "disable_input_personalization",
+        "name_vi": "Tắt cá nhân hóa nhập liệu",
+        "name_en": "Disable Input Personalization",
+        "desc_vi": "Ngăn Windows gửi nội dung gõ/viết cho cloud",
+        "desc_en": "Stop Windows sending typing/inking data to cloud",
+        "needs_admin": False,
+        "risk": "low",
+        "is_applied": _input_applied(),
+        "fn": _input_apply,
+    })
+
+    # 5. Tắt Cloud Content (suggested content / live tiles ads)
+    def _cloud_applied():
+        v = _reg_get_dword(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+            "SubscribedContent-338388Enabled", winreg.HKEY_CURRENT_USER)
+        return v == 0
+
+    tweaks.append({
+        "id": "disable_cloud_content",
+        "name_vi": "Tắt nội dung đề xuất cloud (ads)",
+        "name_en": "Disable Cloud Suggested Content",
+        "desc_vi": "Ẩn nội dung gợi ý/quảng cáo từ cloud trong Start/Settings",
+        "desc_en": "Hide cloud suggested content/ads in Start/Settings",
+        "needs_admin": False,
+        "risk": "low",
+        "is_applied": _cloud_applied(),
+        "fn": lambda: _reg_set_dword(
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager",
+            "SubscribedContent-338388Enabled", 0, winreg.HKEY_CURRENT_USER),
+    })
+
+    return tweaks
+
+
+# ============================ Network optimize ============================
+def network_status():
+    """Đọc trạng thái network. Trả về dict."""
+    status = {
+        "tcp_autotuning": "unknown",
+        "lmhosts_enabled": None,
+        "rss": "unknown",
+    }
+    # TCP auto-tuning level
+    try:
+        r = subprocess.run(["netsh", "interface", "tcp", "show", "global"],
+                           capture_output=True, text=True, timeout=8)
+        out = r.stdout.lower()
+        for line in out.splitlines():
+            if "receive window autotuning" in line:
+                if "normal" in line or "enabled" in line:
+                    status["tcp_autotuning"] = "normal"
+                elif "disabled" in line:
+                    status["tcp_autotuning"] = "disabled"
+                elif "restricted" in line:
+                    status["tcp_autotuning"] = "restricted"
+            elif "rss" in line and "receive segment" in line:
+                if "enabled" in line:
+                    status["rss"] = "enabled"
+                elif "disabled" in line:
+                    status["rss"] = "disabled"
+    except Exception:
+        pass
+    # LMHOSTS lookup
+    try:
+        base = r"SYSTEM\CurrentControlSet\Services\NetBT\Parameters"
+        v = _reg_get_dword(base, "EnableLMHOSTS")
+        status["lmhosts_enabled"] = bool(v) if v is not None else None
+    except Exception:
+        pass
+    return status
+
+
+def network_actions():
+    """Trả về list dict {id, name_vi, name_en, desc, needs_admin, fn}."""
+    return [
+        {
+            "id": "flush_dns",
+            "name_vi": "Xóa cache DNS",
+            "name_en": "Flush DNS Cache",
+            "desc_vi": "Xóa cache phân giải tên miền (sửa lỗi web không vào được)",
+            "desc_en": "Clear DNS resolver cache (fixes web access issues)",
+            "needs_admin": True,
+            "fn": lambda: subprocess.run(
+                ["ipconfig", "/flushdns"],
+                capture_output=True, timeout=15).returncode == 0,
+        },
+        {
+            "id": "reset_winsock",
+            "name_vi": "Reset Winsock",
+            "name_en": "Reset Winsock Catalog",
+            "desc_vi": "Đặt lại danh mục Winsock (sửa lỗi mạng sâu)",
+            "desc_en": "Reset Winsock catalog (fixes deep network issues)",
+            "needs_admin": True,
+            "fn": lambda: subprocess.run(
+                ["netsh", "winsock", "reset"],
+                capture_output=True, timeout=15).returncode == 0,
+        },
+        {
+            "id": "tcp_autotune_on",
+            "name_vi": "Bật TCP Auto-Tuning",
+            "name_en": "Enable TCP Auto-Tuning",
+            "desc_vi": "Tối ưu throughput mạng — nên bật cho kết nối nhanh",
+            "desc_en": "Optimize network throughput — recommended on",
+            "needs_admin": True,
+            "fn": lambda: subprocess.run(
+                ["netsh", "interface", "tcp", "set", "global",
+                 "autotuning=normal"],
+                capture_output=True, timeout=15).returncode == 0,
+        },
+        {
+            "id": "disable_lmhosts",
+            "name_vi": "Tắt LMHOSTS lookup",
+            "name_en": "Disable LMHOSTS Lookup",
+            "desc_vi": "Ngăn NetBIOS name poisoning (vector tấn công LAN)",
+            "desc_en": "Prevent NetBIOS name poisoning (LAN attack vector)",
+            "needs_admin": True,
+            "fn": lambda: _reg_set_dword(
+                r"SYSTEM\CurrentControlSet\Services\NetBT\Parameters",
+                "EnableLMHOSTS", 0),
+        },
+    ]
+
+
+# ============================ Service Manager ============================
+# Bloatware / non-essential services thường tắt để tiết kiệm tài nguyên.
+# Key = service name (mã), Value = mô tả hiển thị.
+BLOATWARE_SERVICES = {
+    "DiagTrack": "Connected User Experiences and Telemetry",
+    "dmwappushservice": "WAP Push Message Routing Service",
+    "SysMain": "SysMain / Superfetch",
+    "WSearch": "Windows Search",
+    "XblGameSave": "Xbox Live Game Save",
+    "XboxGipSvc": "Xbox Accessory Management",
+    "XboxNetApiSvc": "Xbox Live Networking Service",
+    "PrintNotify": "Printer Extensions and Notifications",
+    "Fax": "Fax",
+    "RetailDemo": "Retail Demo Service",
+    "WbioSrvc": "Windows Biometric Service",
+    "SCardSvr": "Smart Card",
+    "ScDeviceEnum": "Smart Card Device Enumeration",
+    "SCPolicySvc": "Smart Card Removal Policy",
+}
+
+_START_TYPE_LABEL = {1: "disabled", 2: "manual", 3: "automatic", 4: "disabled"}
+
+
+def _is_safe_service_name(name):
+    """Kiểm tra tên service chỉ chứa ký tự an toàn (chống command injection)."""
+    import re
+    return bool(re.match(r'^[a-zA-Z0-9_\-.]+$', name or ""))
+
+
+def list_services():
+    """Liệt kê các bloatware service + trạng thái.
+    Trả về list dict {name, display, status, start_type, is_bloatware}.
+    """
+    items = []
+    # Lấy trạng thái tất cả service dạng list (shell=False)
+    try:
+        r = subprocess.run(["sc", "query", "state=", "all"],
+                           capture_output=True, text=True, timeout=15)
+        out = r.stdout
+    except Exception:
+        out = ""
+
+    # Parse theo từng block SERVICE_NAME
+    blocks = {}
+    cur = None
+    for line in out.splitlines():
+        s = line.strip()
+        if s.upper().startswith("SERVICE_NAME:"):
+            cur = s.split(":", 1)[1].strip()
+            blocks[cur] = {"status": "unknown", "start_type": None}
+        elif cur and s.upper().startswith("STATE"):
+            if "RUNNING" in s.upper():
+                blocks[cur]["status"] = "running"
+            elif "STOPPED" in s.upper():
+                blocks[cur]["status"] = "stopped"
+        elif cur and s.upper().startswith("START_TYPE"):
+            try:
+                num = int(s.split(":")[1].strip().split()[0])
+                blocks[cur]["start_type"] = num
+            except (ValueError, IndexError):
+                pass
+
+    # Đóng góp từ bloatware list
+    for name, display in BLOATWARE_SERVICES.items():
+        info = blocks.get(name, {"status": "absent", "start_type": None})
+        items.append({
+            "name": name,
+            "display": display,
+            "status": info["status"],
+            "start_type": info["start_type"],
+            "is_bloatware": True,
+        })
+    return items
+
+
+def toggle_service(name, disable=True):
+    """Bật/tắt service. disable=True → disable+stop, False → enable+start.
+    Trả về True thành công. Dùng subprocess list form (no shell).
+    """
+    if not _is_safe_service_name(name):
+        return False
+    try:
+        if disable:
+            r1 = subprocess.run(["sc", "config", name, "start=", "disabled"],
+                                capture_output=True, timeout=15)
+            # Stop nếu đang chạy
+            subprocess.run(["sc", "stop", name],
+                           capture_output=True, timeout=15)
+            return r1.returncode == 0
+        else:
+            r1 = subprocess.run(["sc", "config", name, "start=", "demand"],
+                                capture_output=True, timeout=15)
+            subprocess.run(["sc", "start", name],
+                           capture_output=True, timeout=15)
+            return r1.returncode == 0
+    except Exception:
+        return False
+
+
+# ============================ Disk: TRIM / Defrag / Cleanup ============================
+def _is_drive_ssd(drive_letter):
+    """Phát hiện SSD bằng PowerShell query. Trả về True/False/None."""
+    try:
+        ps = ("(Get-PhysicalDisk -ErrorAction SilentlyContinue | "
+              "Where-Object MediaType -eq 'SSD').Count -gt 0")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=12)
+        return r.stdout.strip().lower() in ("true", "1", "yes")
+    except Exception:
+        return None
+
+
+def disk_optimization_info():
+    """Per-drive optimization status.
+    Trả về list dict {drive, is_ssd, percent, free, total}.
+    """
+    ssd_global = _is_drive_ssd("C")
+    info = []
+    for d in disk_usage():
+        drive = d["drive"].rstrip("\\/")
+        info.append({
+            "drive": drive,
+            "is_ssd": ssd_global,
+            "percent": d["percent"],
+            "free": d["free"],
+            "total": d["total"],
+        })
+    return info
+
+
+def run_trim_all():
+    """Chạy TRIM trên tất cả SSD. Cần Admin."""
+    try:
+        drives = [d["drive"].rstrip("\\/") for d in disk_optimization_info()
+                  if d.get("is_ssd")]
+        if not drives:
+            return False
+        # defrag /o = TRIM trên SSD (list form, no shell)
+        args = ["defrag"] + drives + ["/o"]
+        r = subprocess.run(args, capture_output=True, timeout=120)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def run_defrag(drive):
+    """Defrag ổ HDD. Cần Admin. drive = 'C:' (đã validate)."""
+    if not drive or not _is_safe_service_name(drive.replace(":", "")):
+        return False
+    try:
+        r = subprocess.run(["defrag", drive, "/O"],
+                           capture_output=True, timeout=300)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def run_disk_cleanup():
+    """Gọi Disk Cleanup tool (cleanmgr). Cần Admin để dọn sâu."""
+    try:
+        subprocess.Popen(["cleanmgr.exe", "/verylowdisk"])
+        return True
+    except Exception:
+        return False
+
+
 # ============================ Actions (gốc) ============================
 PSAPI = ctypes.WinDLL("psapi.dll")
 _PROCESS_SET_QUOTA = 0x0100
@@ -517,9 +907,523 @@ def suggested_actions():
             "id": "clear_clipboard",
             "name_vi": "Xóa clipboard",
             "name_en": "Clear clipboard",
-            "desc_vi": "Xóa nội dung clipboard hiện tại.",
+            "desc_vi": "Xóc nội dung clipboard hiện tại.",
             "desc_en": "Clear current clipboard contents.",
             "needs_admin": False,
             "fn": clear_clipboard,
         },
     ]
+
+
+# ============================ Boot Time Analyze ============================
+def boot_time_analyze():
+    """Phân tích thời gian boot gần đây qua event log.
+    Trả về dict {last_boot_seconds, last_boot_time, avg_seconds, events}
+    """
+    import xml.etree.ElementTree as ET
+    result = {"last_boot_seconds": None, "last_boot_time": None,
+              "avg_seconds": None, "events": []}
+    try:
+        ps_cmd = ("Get-WinEvent -FilterHashtable @{LogName='Microsoft-Windows-Diagnostics-Performance/Operational';"
+                  "Id=100;MaxEvents=10} -ErrorAction SilentlyContinue "
+                  "| ForEach-Object { ($_.Properties[0].Value, $_.TimeCreated.ToString('s')) -join '|' }")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=15)
+        events = []
+        for line in r.stdout.splitlines():
+            line = line.strip()
+            if "|" in line:
+                try:
+                    secs, t = line.split("|", 1)
+                    events.append({"seconds": int(float(secs) / 1000), "time": t})
+                except (ValueError, IndexError):
+                    pass
+        if events:
+            events.sort(key=lambda x: x["time"], reverse=True)
+            result["last_boot_seconds"] = events[0]["seconds"]
+            result["last_boot_time"] = events[0]["time"]
+            result["avg_seconds"] = sum(e["seconds"] for e in events) // len(events)
+            result["events"] = events[:8]
+    except Exception:
+        pass
+    return result
+
+
+# ============================ App Uninstaller ============================
+def app_uninstaller_list():
+    """Liệt kê ứng dụng đã cài từ registry HKLM/HKCU Uninstall.
+    Trả về list dict {name, publisher, version, install_location, uninstall_cmd}
+    """
+    items = []
+    bases = [
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 64),
+        (winreg.HKEY_LOCAL_MACHINE,
+         r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall", 32),
+        (winreg.HKEY_CURRENT_USER,
+         r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall", 64),
+    ]
+    for hive, sub, _bits in bases:
+        try:
+            with winreg.OpenKey(hive, sub, 0,
+                                winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as base:
+                i = 0
+                while True:
+                    try:
+                        guid = winreg.EnumKey(base, i)
+                        i += 1
+                        try:
+                            with winreg.OpenKey(base, guid, 0,
+                                                winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as k:
+                                def _get(name):
+                                    try:
+                                        v, _ = winreg.QueryValueEx(k, name)
+                                        return str(v) if v else ""
+                                    except OSError:
+                                        return ""
+                                name = _get("DisplayName")
+                                sys_component = _get("SystemComponent")
+                                if not name or sys_component == "1":
+                                    continue
+                                items.append({
+                                    "name": name,
+                                    "publisher": _get("Publisher"),
+                                    "version": _get("DisplayVersion"),
+                                    "install_location": _get("InstallLocation"),
+                                    "uninstall_cmd": _get("UninstallString"),
+                                    "estimated_size_kb": _get("EstimatedSize"),
+                                })
+                        except (FileNotFoundError, OSError):
+                            continue
+                    except OSError:
+                        break
+        except (FileNotFoundError, OSError):
+            continue
+    # Khử trùng lặp theo name
+    seen = set()
+    unique = []
+    for it in items:
+        if it["name"] not in seen:
+            seen.add(it["name"])
+            unique.append(it)
+    unique.sort(key=lambda x: x["name"].lower())
+    return unique
+
+
+# ============================ Duplicate File Finder ============================
+def duplicate_finder(roots=None, min_size_mb=10):
+    """Tìm tệp trùng lặp trong các thư mục.
+    roots: list path; mặc định ['USERPROFILE\\Downloads', 'USERPROFILE\\Desktop'].
+    min_size_mb: bỏ qua file nhỏ hơn.
+    Trả về list dict {hash, size, files}
+    """
+    if roots is None:
+        roots = []
+        profile = os.environ.get("USERPROFILE", "")
+        for sub in ("Downloads", "Desktop", "Documents", "Pictures"):
+            p = os.path.join(profile, sub)
+            if os.path.isdir(p):
+                roots.append(p)
+    if not roots:
+        return []
+    min_size = min_size_mb * 1024 * 1024
+    by_size = {}  # (size, partial_hash) -> [paths]
+    by_full = {}  # full hash -> [paths]
+    for root in roots:
+        if not _is_safe_path(root):
+            continue
+        try:
+            for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+                # Bỏ qua system/hidden dirs để nhanh
+                dirnames[:] = [d for d in dirnames
+                               if not d.startswith(".") and d.lower() not in
+                               ("node_modules", ".git", "__pycache__")]
+                for fn in filenames:
+                    fp = os.path.join(dirpath, fn)
+                    if not _is_safe_path(fp):
+                        continue
+                    try:
+                        st = os.stat(fp)
+                        if st.st_size < min_size:
+                            continue
+                        # Đọc 8KB đầu + cuối để gom nhóm nhanh
+                        with open(fp, "rb") as f:
+                            head = f.read(8192)
+                            if st.st_size > 8192:
+                                f.seek(-8192, 2)
+                                tail = f.read(8192)
+                            else:
+                                tail = b""
+                        partial = hashlib.md5(head + tail).hexdigest()
+                        key = (st.st_size, partial)
+                        by_size.setdefault(key, []).append(fp)
+                    except (PermissionError, OSError):
+                        continue
+        except (PermissionError, OSError):
+            continue
+    # Hash đầy đủ cho các nhóm có > 1 file
+    groups = []
+    for (size, partial), paths in by_size.items():
+        if len(paths) < 2:
+            continue
+        for fp in paths:
+            try:
+                with open(fp, "rb") as f:
+                    h = hashlib.md5()
+                    while True:
+                        chunk = f.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        h.update(chunk)
+                    full = h.hexdigest()
+                by_full.setdefault(full, []).append(fp)
+            except (PermissionError, OSError):
+                continue
+    for h, paths in by_full.items():
+        if len(paths) >= 2:
+            try:
+                size = os.path.getsize(paths[0])
+                groups.append({"hash": h, "size": size, "files": paths})
+            except OSError:
+                continue
+    groups.sort(key=lambda g: g["size"] * len(g["files"]), reverse=True)
+    return groups[:50]  # top 50 nhóm
+
+
+def _is_safe_path(p):
+    """Chặn path traversal — chỉ cho phép trong user profile."""
+    try:
+        up = os.path.realpath(os.environ.get("USERPROFILE", "C:\\"))
+        target = os.path.realpath(p)
+        return target.startswith(up)
+    except (OSError, ValueError):
+        return False
+
+
+# ============================ Health Report ============================
+def health_report():
+    """Báo cáo tổng: RAM, Disk, CPU, score.
+    Trả về dict {ram, cpu, disks[], top_issues[]}
+    """
+    rep = {
+        "ram": ram_usage(),
+        "cpu": cpu_percent(),
+        "disks": disk_usage(),
+        "top_issues": [],
+    }
+    # Phát hiện vấn đề
+    if rep["ram"]["percent"] > 85:
+        rep["top_issues"].append("RAM > 85% — cân nhắc dùng Free RAM")
+    for d in rep["disks"]:
+        if d["percent"] > 90:
+            rep["top_issues"].append(f"Ổ {d['drive']} > 90% — dọn rác ngay")
+        elif d["percent"] > 80:
+            rep["top_issues"].append(f"Ổ {d['drive']} > 80% — sắp đầy")
+    if rep["cpu"] > 80:
+        rep["top_issues"].append(f"CPU > 80% — kiểm tra tab tiến trình")
+    # Startup items
+    si = startup_items()
+    if len(si) > 15:
+        rep["top_issues"].append(f"{len(si)} mục startup — vô hiệu mục không cần")
+    return rep
+
+
+# ============================ Battery Report ============================
+def battery_report():
+    """Báo cáo pin (laptop).
+    Trả về dict {has_battery, percent, status, cycles, design_capacity_mwh, full_charge_mwh}
+    """
+    res = {"has_battery": False}
+    try:
+        ps_cmd = ("$b = Get-WmiObject -Class Win32_Battery -ErrorAction SilentlyContinue | Select-Object -First 1;"
+                  "if ($b) { @($b.EstimatedChargeRemaining, $b.BatteryStatus, $b.DesignCapacity) -join '|' } else { '' }")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps_cmd],
+            capture_output=True, text=True, timeout=10)
+        out = r.stdout.strip()
+        if out and "|" in out:
+            parts = out.split("|")
+            if len(parts) >= 2:
+                res["has_battery"] = True
+                try:
+                    res["percent"] = int(parts[0])
+                except ValueError:
+                    pass
+                status_map = {1: "discharging", 2: "ac_online", 3: "fully_charged",
+                              4: "low", 5: "critical", 6: "charging", 7: "charging_high",
+                              8: "charging_low", 9: "charging_critical", 10: "unknown",
+                              11: "partially_charged"}
+                try:
+                    res["status"] = status_map.get(int(parts[1]), "unknown")
+                except (ValueError, IndexError):
+                    res["status"] = "unknown"
+    except Exception:
+        pass
+    if not res["has_battery"]:
+        return res
+    # Cycles + design capacity
+    try:
+        ps2 = ("(Get-WmiObject -Namespace 'root\\WMI' -Class BatteryFullChargedCapacity -ErrorAction SilentlyContinue).FullChargedCapacity | Select-Object -First 1")
+        r2 = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps2],
+            capture_output=True, text=True, timeout=10)
+        v = r2.stdout.strip()
+        if v.isdigit():
+            res["full_charge_mwh"] = int(v)
+    except Exception:
+        pass
+    try:
+        ps3 = ("(Get-WmiObject -Namespace 'root\\WMI' -Class BatteryCycleCount -ErrorAction SilentlyContinue).CycleCount | Select-Object -First 1")
+        r3 = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps3],
+            capture_output=True, text=True, timeout=10)
+        v = r3.stdout.strip()
+        if v.isdigit():
+            res["cycles"] = int(v)
+    except Exception:
+        pass
+    return res
+
+
+# ============================ Scheduled Task Cleanup ============================
+def scheduled_task_cleanup(dry_run=True):
+    """Liệt kê scheduled task trỏ đến đường dẫn không còn tồn tại.
+    dry_run=True: chỉ liệt kê.
+    dry_run=False: xóa task.
+    Trả về list dict {name, path, action}.
+    """
+    items = []
+    try:
+        ps = ("Get-ScheduledTask -ErrorAction SilentlyContinue | ForEach-Object { "
+              "$task = $_; $info = $task | Get-ScheduledTaskInfo -ErrorAction SilentlyContinue; "
+              "$task.Actions | ForEach-Object { "
+              "$exe = $_.Execute; "
+              "if ($exe -and -not (Test-Path $exe -ErrorAction SilentlyContinue)) { "
+              "'{0}|{1}|{2}' -f $task.TaskPath, $task.TaskName, $exe } } }")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=25)
+        for line in r.stdout.splitlines():
+            parts = line.strip().split("|", 2)
+            if len(parts) == 3:
+                path, name, action = parts
+                items.append({"path": path, "name": name, "action": action})
+    except Exception:
+        pass
+    if not dry_run and items:
+        for it in items[:20]:  # giới hạn 20 để an toàn
+            try:
+                subprocess.run(
+                    ["schtasks", "/Delete", "/TN", it["path"] + it["name"], "/F"],
+                    capture_output=True, timeout=10)
+            except Exception:
+                pass
+    return items
+
+
+# ============================ Prefetch Analyze ============================
+def prefetch_analyze():
+    """Liệt kê các file .pf trong C:\\Windows\\Prefetch.
+    Trả về list dict {name, run_count} (run_count nếu parse được).
+    """
+    items = []
+    pf_dir = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "Prefetch")
+    if not os.path.isdir(pf_dir):
+        return items
+    try:
+        for fn in os.listdir(pf_dir):
+            if not fn.lower().endswith(".pf"):
+                continue
+            try:
+                fp = os.path.join(pf_dir, fn)
+                st = os.stat(fp)
+                items.append({"name": fn[:-3], "size": st.st_size,
+                              "mtime": st.st_mtime})
+            except OSError:
+                continue
+    except (PermissionError, OSError):
+        pass
+    items.sort(key=lambda x: x["mtime"], reverse=True)
+    return items[:50]
+
+
+# ============================ Windows Update Status ============================
+def windows_update_status():
+    """Trạng thái Windows Update.
+    Trả về dict {pending_count, last_install_date, auto_update_enabled}
+    """
+    res = {"pending_count": None, "last_install_date": None,
+           "auto_update_enabled": None}
+    try:
+        ps = ("$ciu = (New-Object -ComObject Microsoft.Update.AutoUpdate).Results | Select-Object -Last 1;"
+              "$pending = (Get-WmiObject -Class Win32_QuickFixEngineering | Measure-Object).Count;"
+              "$au = (Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU' -ErrorAction SilentlyContinue).NoAutoUpdate;"
+              "if ($null -eq $au) { $au = (Get-ItemProperty -Path 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\OSUpgrade' -ErrorAction SilentlyContinue).AllowOSUpgrade }; "
+              "$last = (Get-WmiObject -Class Win32_QuickFixEngineering | Sort-Object InstalledOn -Descending | Select-Object -First 1).InstalledOn; "
+              "('{0}|{1}|{2}' -f $pending, $last, (-not $au))")
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", ps],
+            capture_output=True, text=True, timeout=20)
+        out = r.stdout.strip()
+        if "|" in out:
+            parts = out.split("|")
+            try:
+                if parts[0]:
+                    res["pending_count"] = int(parts[0])
+            except ValueError:
+                pass
+            if len(parts) > 1 and parts[1]:
+                res["last_install_date"] = parts[1]
+            if len(parts) > 2:
+                res["auto_update_enabled"] = parts[2].strip().lower() == "true"
+    except Exception:
+        pass
+    return res
+
+
+# ============================ Font Cache Clear ============================
+def font_cache_clear():
+    """Xóa font cache (FNTCACHE.dat) + restart Windows Font Cache Service.
+    Cần Admin. Trả về True/False.
+    """
+    fnt = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                       "System32", "FNTCACHE.dat")
+    try:
+        # Stop FontCache service
+        subprocess.run(["net", "stop", "FontCache3.0.0.0"],
+                       capture_output=True, timeout=15)
+        if os.path.isfile(fnt):
+            try:
+                os.remove(fnt)
+            except (PermissionError, OSError):
+                pass
+        subprocess.run(["net", "start", "FontCache3.0.0.0"],
+                       capture_output=True, timeout=15)
+        return True
+    except Exception:
+        return False
+
+
+# ============================ Thumbnail Cache Clear ============================
+def thumbnail_cache_clear():
+    """Xóa thumbnail cache (thumbs.db per-folder) + Explorer thumbcache.db.
+    Trả về dict {removed_files, skipped, total_freed}
+    """
+    res = {"removed_files": 0, "skipped": 0, "total_freed": 0}
+    # Explorer global cache
+    appdata = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
+        os.path.join(appdata, "Microsoft", "Windows", "Explorer"),
+    ]
+    for d in candidates:
+        if not os.path.isdir(d):
+            continue
+        try:
+            for fn in os.listdir(d):
+                low = fn.lower()
+                if low.startswith("thumbcache") or low == "iconcache.db":
+                    fp = os.path.join(d, fn)
+                    try:
+                        sz = os.path.getsize(fp)
+                        os.remove(fp)
+                        res["removed_files"] += 1
+                        res["total_freed"] += sz
+                    except (PermissionError, OSError):
+                        res["skipped"] += 1
+        except (PermissionError, OSError):
+            pass
+    return res
+
+
+# ============================ Icon Cache Rebuild ============================
+def icon_cache_rebuild():
+    """Xóa IconCache.db + restart Explorer để rebuild.
+    Trả về True/False.
+    """
+    appdata = os.environ.get("LOCALAPPDATA", "")
+    ic = os.path.join(appdata, "Microsoft", "Windows", "Explorer", "IconCache.db")
+    try:
+        if os.path.isfile(ic):
+            os.remove(ic)
+    except (PermissionError, OSError):
+        pass
+    return restart_explorer()
+
+
+# ============================ Shader Cache Clear ============================
+def shader_cache_clear():
+    """Xóa DirectX shader cache + OpenGL shader cache.
+    Trả về dict {removed_files, total_freed}
+    """
+    res = {"removed_files": 0, "total_freed": 0}
+    appdata = os.environ.get("LOCALAPPDATA", "")
+    candidates = [
+        os.path.join(appdata, "D3DSCache"),
+        os.path.join(appdata, "NVIDIA", "DXCache"),
+        os.path.join(appdata, "AMD", "DxCache"),
+        os.path.join(os.environ.get("SystemRoot", r"C:\Windows"),
+                     "System32", "config", "systemprofile", "AppData", "Local", "D3DSCache"),
+    ]
+    for d in candidates:
+        if not os.path.isdir(d):
+            continue
+        try:
+            for fn in os.listdir(d):
+                fp = os.path.join(d, fn)
+                try:
+                    if os.path.isfile(fp):
+                        sz = os.path.getsize(fp)
+                        os.remove(fp)
+                        res["removed_files"] += 1
+                        res["total_freed"] += sz
+                except (PermissionError, OSError):
+                    continue
+        except (PermissionError, OSError):
+            continue
+    return res
+
+
+# ============================ Large Apps Scan ============================
+def large_apps_scan(roots=None, top_n=20):
+    """Quét ứng dụng lớn nhất trong Program Files.
+    roots: list; mặc định ['C:\\Program Files', 'C:\\Program Files (x86)'].
+    Trả về list dict {path, name, size}
+    """
+    if roots is None:
+        roots = [r"C:\Program Files", r"C:\Program Files (x86)"]
+    items = []
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            for entry in os.scandir(root):
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                size = _dir_size_deep(entry.path, max_entries=500)
+                if size > 0:
+                    items.append({"name": entry.name, "path": entry.path, "size": size})
+        except (PermissionError, OSError):
+            continue
+    items.sort(key=lambda x: x["size"], reverse=True)
+    return items[:top_n]
+
+
+def _dir_size_deep(path, max_entries=500):
+    """Tính size nhanh (giới hạn entries để tránh treo)."""
+    total = 0
+    count = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
+            for fn in filenames:
+                fp = os.path.join(dirpath, fn)
+                try:
+                    total += os.path.getsize(fp)
+                    count += 1
+                    if count >= max_entries:
+                        return total
+                except OSError:
+                    continue
+    except (PermissionError, OSError):
+        pass
+    return total

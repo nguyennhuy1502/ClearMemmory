@@ -2,8 +2,10 @@ __pycache__/
 *.pyc
 build/
 dist/
+installer_output/
 *.spec
 cleaner_error.log
 *.egg-info/
 .eggs/
 *.tmp
+$null
