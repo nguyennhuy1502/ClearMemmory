@@ -441,3 +441,29 @@ def run_as_admin():
         return rc > 32
     except Exception:
         return False
+
+
+# ============================ Parallel scan ============================
+def scan_all_parallel(cats, on_progress=None, max_workers=4):
+    """Quét nhiều category SONG SONG (ThreadPoolExecutor).
+    cats: list category dicts.
+    on_progress(idx, n, cat_id): callback tùy chọn (gọi khi hoàn thành mỗi cat).
+    Trả về dict {cat_id: scan_result}.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = {}
+    n = len(cats)
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(scan_category, c): c["id"] for c in cats}
+        completed = 0
+        for fut in as_completed(futures):
+            cid = futures[fut]
+            try:
+                results[cid] = fut.result()
+            except Exception as e:
+                results[cid] = {"category": cid, "files": [], "size": 0,
+                                "count": 0, "note": f"error: {e}", "est": False}
+            completed += 1
+            if on_progress:
+                on_progress(completed - 1, n, cid)
+    return results

@@ -1399,10 +1399,11 @@ class CleanerApp:
 
         def work():
             try:
-                results = {}
-                for i, c in enumerate(self.cats):
-                    self._msg_q.put(("scan_progress", i, len(self.cats), c["id"]))
-                    results[c["id"]] = core.scan_category(c)
+                # Parallel scan: 4 worker threads, cùng progress callback
+                def cb(i, n, cid):
+                    self._msg_q.put(("scan_progress", i, n, cid))
+                results = core.scan_all_parallel(
+                    self.cats, on_progress=cb, max_workers=4)
                 self._msg_q.put(("scan_done", results))
             except Exception as e:
                 self._msg_q.put(("error", e))

@@ -174,10 +174,39 @@ _STARTUP_KEYS = [
 ]
 
 
+# ============================ TTL cache ============================
+# Cache các hàm scan nặng (registry, psutil) trong 30s để tránh
+# scan lặp khi UI refresh liên tục.
+_CACHE = {}
+_CACHE_TTL = 30  # seconds
+
+
+def _cached(key, fn):
+    """Cache kết quả fn() trong _CACHE_TTL giây."""
+    import time as _t
+    now = _t.time()
+    if key in _CACHE:
+        ts, val = _CACHE[key]
+        if now - ts < _CACHE_TTL:
+            return val
+    val = fn()
+    _CACHE[key] = (now, val)
+    return val
+
+
+def invalidate_cache():
+    """Xóa cache khi user thực hiện thay đổi."""
+    _CACHE.clear()
+
+
 def startup_items():
-    """Liệt kê tất cả mục startup từ registry.
+    """Liệt kê tất cả mục startup từ registry (cached 30s).
     Trả về: list dict {name, value, source, hive, key_path}
     """
+    return _cached("startup_items", _startup_items_uncached)
+
+
+def _startup_items_uncached():
     items = []
     for hive, sub, label in _STARTUP_KEYS:
         try:
@@ -248,6 +277,7 @@ def toggle_startup(name, hive, key_path, enable=True):
                 return False
     finally:
         winreg.CloseKey(key)
+    invalidate_cache()  # Startup list đã thay đổi
 
 
 # ============================ System Tweaks ============================
@@ -1103,9 +1133,13 @@ def _is_safe_path(p):
 
 # ============================ Health Report ============================
 def health_report():
-    """Báo cáo tổng: RAM, Disk, CPU, score.
+    """Báo cáo tổng: RAM, Disk, CPU, score (cached 15s).
     Trả về dict {ram, cpu, disks[], top_issues[]}
     """
+    return _cached("health_report", _health_report_uncached)
+
+
+def _health_report_uncached():
     rep = {
         "ram": ram_usage(),
         "cpu": cpu_percent(),

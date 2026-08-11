@@ -899,24 +899,39 @@ SECURITY_CHECKS = [
 ]
 
 
-def run_security_scan(progress=None):
-    """Chạy tất cả kiểm tra bảo mật.
+def run_security_scan(progress=None, max_workers=4):
+    """Chạy tất cả kiểm tra bảo mật song song (ThreadPoolExecutor).
     Trả về: [(group_name, [(item_name, value, risk_level), ...]), ...]
-    progress(i, n, group_name) callback tùy chọn.
+    progress(i, n, group_name) callback tùy chọn (gọi theo thứ tự hoàn thành).
     """
-    results = []
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     n = len(SECURITY_CHECKS)
-    for i, (name, func) in enumerate(SECURITY_CHECKS):
-        if progress:
-            progress(i, n, name)
-        try:
-            items = func()
-        except Exception as e:
-            items = [(name, f"Lỗi: {e}", "info")]
-        results.append((name, items))
+    by_index_items = {}
+    by_index_name = {}
+    completed = 0
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_safe_check, name, func): idx
+                   for idx, (name, func) in enumerate(SECURITY_CHECKS)}
+        for fut in as_completed(futures):
+            idx = futures[fut]
+            name = SECURITY_CHECKS[idx][0]
+            by_index_items[idx] = fut.result()
+            by_index_name[idx] = name
+            completed += 1
+            if progress:
+                progress(completed - 1, n, name)
+    results = [(by_index_name[i], by_index_items[i]) for i in range(n)]
     if progress:
         progress(n, n, None)
     return results
+
+
+def _safe_check(name, func):
+    """Chạy 1 check an toàn — trả về list items hoặc error stub."""
+    try:
+        return func()
+    except Exception as e:
+        return [(name, f"Lỗi: {e}", "info")]
 
 
 def risk_color(level):
