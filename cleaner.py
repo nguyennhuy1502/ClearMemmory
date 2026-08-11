@@ -40,6 +40,20 @@ sys.excepthook = _excepthook
 APP_TITLE = "ClearMemmory — Deep System Cleaner"
 
 
+# ═══════════════════════════ Design tokens ═══════════════════════════
+# Font scale (chuẩn hoá): chỉ dùng các cỡ này để đảm bảo hierarchy rõ ràng.
+F_TITLE   = ("Segoe UI Semibold", 16)   # Tiêu đề app / page
+F_SUBTITLE= ("Segoe UI", 9)              # Subtitle dưới tiêu đề
+F_SECTION = ("Segoe UI Semibold", 11)    # Tiêu đề section (cards, label frame)
+F_BODY    = ("Segoe UI", 9)              # Body / label chính
+F_CAPTION = ("Segoe UI", 8)              # Caption / hint / italic
+F_HERO    = ("Segoe UI Semibold", 24)    # Dashboard số liệu lớn (security score)
+F_HERO_2  = ("Segoe UI Semibold", 16)    # Dashboard số liệu vừa (junk total)
+F_BTN     = ("Segoe UI", 9)              # Button text
+F_MONO    = ("Consolas", 9)              # Code / log / textbox
+F_MONO_B  = ("Consolas", 9, "bold")      # Mono bold (cho header log)
+
+
 # ═══════════════════════════ Song ngữ ═══════════════════════════
 class T:
     vi = {
@@ -394,15 +408,15 @@ class CleanerApp:
         title_frame = ttk.Frame(header)
         title_frame.pack(side="left")
         ttk.Label(title_frame, text="🧹 " + APP_TITLE,
-                  font=("Segoe UI", 14, "bold")).pack(anchor="w")
+                  font=F_TITLE).pack(anchor="w")
         ttk.Label(title_frame, text=self.t.get("subtitle"),
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_SUBTITLE).pack(anchor="w")
 
         right_hdr = ttk.Frame(header)
         right_hdr.pack(side="right")
         self.admin_var = tk.StringVar()
         ttk.Label(right_hdr, textvariable=self.admin_var,
-                  font=("Segoe UI", 9)).pack(anchor="e")
+                  font=F_BODY).pack(anchor="e")
         btn_frame_hdr = ttk.Frame(right_hdr)
         btn_frame_hdr.pack(anchor="e", pady=(2, 0))
         self.btn_refresh_all = ttk.Button(
@@ -442,7 +456,7 @@ class CleanerApp:
         ttk.Separator(self.sidebar, orient="horizontal").pack(fill="x", pady=12)
         self.sidebar_info = tk.StringVar()
         ttk.Label(self.sidebar, textvariable=self.sidebar_info,
-                  font=("Segoe UI", 8), foreground="gray",
+                  font=F_CAPTION, foreground="gray",
                   wraplength=160, justify="left").pack(anchor="w")
 
         # Content (phải)
@@ -471,7 +485,7 @@ class CleanerApp:
         foot.pack(fill="x")
         self.status_var = tk.StringVar(value=self.t.get("status_empty"))
         ttk.Label(foot, textvariable=self.status_var,
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         self.progress = ttk.Progressbar(foot, mode="determinate")
         self.progress.pack(fill="x", pady=(3, 0))
 
@@ -516,10 +530,10 @@ class CleanerApp:
         ram_card = ttk.Frame(sys_frame)
         ram_card.pack(fill="x", pady=4)
         ttk.Label(ram_card, text="📊 " + self.t.get("dash_ram"),
-                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self.dash_ram_var = tk.StringVar(value="…")
         ttk.Label(ram_card, textvariable=self.dash_ram_var,
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         self.dash_ram_bar = ttk.Progressbar(ram_card, maximum=100)
         self.dash_ram_bar.pack(fill="x", pady=(2, 0))
 
@@ -527,10 +541,10 @@ class CleanerApp:
         cpu_card = ttk.Frame(sys_frame)
         cpu_card.pack(fill="x", pady=4)
         ttk.Label(cpu_card, text="⚡ " + self.t.get("dash_cpu"),
-                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self.dash_cpu_var = tk.StringVar(value="…")
         ttk.Label(cpu_card, textvariable=self.dash_cpu_var,
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         self.dash_cpu_bar = ttk.Progressbar(cpu_card, maximum=100)
         self.dash_cpu_bar.pack(fill="x", pady=(2, 0))
 
@@ -538,10 +552,10 @@ class CleanerApp:
         disk_card = ttk.Frame(sys_frame)
         disk_card.pack(fill="x", pady=4)
         ttk.Label(disk_card, text="💾 " + self.t.get("dash_disk"),
-                  font=("Segoe UI", 10, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self.dash_disk_var = tk.StringVar(value="…")
         ttk.Label(disk_card, textvariable=self.dash_disk_var,
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         self.dash_disk_bar = ttk.Progressbar(disk_card, maximum=100)
         self.dash_disk_bar.pack(fill="x", pady=(2, 0))
 
@@ -550,16 +564,16 @@ class CleanerApp:
         center.grid(row=0, column=1, padx=6, pady=0, sticky="nsew")
 
         ttk.Label(center, text=self.t.get("dash_total_junk"),
-                  font=("Segoe UI", 10)).pack(pady=(8, 0))
+                  font=F_BODY).pack(pady=(8, 0))
         self.dash_junk_var = tk.StringVar(value="—")
         ttk.Label(center, textvariable=self.dash_junk_var,
-                  font=("Segoe UI", 22, "bold")).pack()
+                  font=F_HERO_2).pack()
 
         ttk.Label(center, text=self.t.get("dash_total_freed"),
-                  font=("Segoe UI", 10)).pack(pady=(8, 0))
+                  font=F_BODY).pack(pady=(8, 0))
         self.dash_freed_var = tk.StringVar(value="0 B")
         ttk.Label(center, textvariable=self.dash_freed_var,
-                  font=("Segoe UI", 16)).pack()
+                  font=F_HERO_2).pack()
 
         ttk.Frame(center).pack(pady=8)
 
@@ -576,7 +590,7 @@ class CleanerApp:
         self.dash_last_var = tk.StringVar(
             value=self.t.get("dash_last_scan") + ": " + self.t.get("dash_no_scan"))
         ttk.Label(center, textvariable=self.dash_last_var,
-                  font=("Segoe UI", 8, "italic")).pack(pady=(8, 0))
+                  font=F_CAPTION).pack(pady=(8, 0))
 
         # ── Phải: Security score ──
         sec_frame = ttk.LabelFrame(p, text=self.t.get("dash_sec_score"), padding=12)
@@ -584,10 +598,10 @@ class CleanerApp:
 
         self.dash_sec_var = tk.StringVar(value=self.t.get("dash_sec_notyet"))
         ttk.Label(sec_frame, textvariable=self.dash_sec_var,
-                  font=("Segoe UI", 24, "bold")).pack(pady=8)
+                  font=F_HERO).pack(pady=8)
         self.dash_sec_detail_var = tk.StringVar(value="")
         ttk.Label(sec_frame, textvariable=self.dash_sec_detail_var,
-                  font=("Segoe UI", 9)).pack()
+                  font=F_BODY).pack()
 
         ttk.Separator(sec_frame, orient="horizontal").pack(fill="x", pady=8)
         ttk.Button(sec_frame, text=self.t.get("sec_scan"),
@@ -644,7 +658,7 @@ class CleanerApp:
                    command=self._open_detail_for_selection).pack(side="right")
 
         ttk.Label(p, text=self.t.get("hint_click"),
-                  font=("Segoe UI", 8, "italic"),
+                  font=F_CAPTION,
                   foreground="gray").pack(anchor="w", padx=6, pady=(2, 0))
 
         # Treeview
@@ -688,7 +702,7 @@ class CleanerApp:
         bar = ttk.Frame(p, padding=(4, 4, 4, 4))
         bar.pack(fill="x")
         ttk.Label(bar, text=self.t.get("opt_actions"),
-                  font=("Segoe UI", 10, "bold")).pack(side="left")
+                  font=F_SECTION).pack(side="left")
         ttk.Button(bar, text=self.t.get("opt_refresh"),
                    command=self._refresh_optimize).pack(side="right")
 
@@ -728,7 +742,7 @@ class CleanerApp:
         ram_f.grid(row=0, column=0, sticky="ew", pady=(4, 2))
         self.opt_ram_var = tk.StringVar(value="…")
         ttk.Label(ram_f, textvariable=self.opt_ram_var,
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self.opt_ram_bar = ttk.Progressbar(ram_f, maximum=100)
         self.opt_ram_bar.pack(fill="x", pady=(2, 0))
 
@@ -737,7 +751,7 @@ class CleanerApp:
         cpu_f.grid(row=1, column=0, sticky="ew", pady=2)
         self.opt_cpu_var = tk.StringVar(value="…")
         ttk.Label(cpu_f, textvariable=self.opt_cpu_var,
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self.opt_cpu_bar = ttk.Progressbar(cpu_f, maximum=100)
         self.opt_cpu_bar.pack(fill="x", pady=(2, 0))
 
@@ -805,7 +819,7 @@ class CleanerApp:
                                "có thể ảnh hưởng ổn định." if self.t.lang == "vi"
                                else "⚠ Only disable services you understand. "
                                     "Critical system services affect stability."),
-                         font=("Segoe UI", 8, "italic"), foreground="#b7950b")
+                         font=F_CAPTION, foreground="#b7950b")
         warn.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
 
         sv_frame = ttk.LabelFrame(t, text=self.t.get("opt_sv_title"), padding=8)
@@ -864,10 +878,10 @@ class CleanerApp:
                    padx=4, pady=(0, 4))
         self.net_status_var = tk.StringVar(value="…")
         ttk.Label(net_f, textvariable=self.net_status_var,
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         ttk.Separator(net_f, orient="horizontal").pack(fill="x", pady=4)
         ttk.Label(net_f, text=self.t.get("opt_net_actions"),
-                  font=("Segoe UI", 9, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         self._net_btn_frame = ttk.Frame(net_f)
         self._net_btn_frame.pack(fill="x", pady=2)
 
@@ -965,7 +979,7 @@ class CleanerApp:
         # Phải: output textbox
         right = ttk.LabelFrame(p, text=self.t.get("opt_tools_title"), padding=8)
         right.grid(row=0, column=1, sticky="nsew", padx=(4, 8), pady=8)
-        self.tools_text = tk.Text(right, wrap="word", font=("Consolas", 9),
+        self.tools_text = tk.Text(right, wrap="word", font=F_MONO,
                                   height=20, state="disabled")
         ts = ttk.Scrollbar(right, orient="vertical", command=self.tools_text.yview)
         self.tools_text.configure(yscrollcommand=ts.set)
@@ -1189,7 +1203,7 @@ class CleanerApp:
         self.btn_sec_scan.pack(side="left")
         self.sec_summary_var = tk.StringVar(value="")
         ttk.Label(top_bar, textvariable=self.sec_summary_var,
-                  font=("Segoe UI", 10, "bold")).pack(side="left", padx=12)
+                  font=F_SECTION).pack(side="left", padx=12)
 
         # Bảng nhóm kiểm tra
         sec_frame = ttk.Frame(p)
@@ -1221,7 +1235,7 @@ class CleanerApp:
                                                padding=8)
         self.sec_detail_frame.pack(fill="both", expand=True, padx=4, pady=(0, 4))
         self.sec_detail_text = tk.Text(self.sec_detail_frame, height=8,
-                                       font=("Consolas", 9), wrap="word",
+                                       font=F_MONO, wrap="word",
                                        state="disabled")
         self.sec_detail_text.pack(fill="both", expand=True)
 
@@ -1488,10 +1502,10 @@ class CleanerApp:
         skipped = sum(r["skipped"] for r in out.values())
         ttk.Label(self.result_frame,
                   text=self.t.get("result_total", size=core.format_size(total)),
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                  font=F_SECTION).pack(anchor="w")
         ttk.Label(self.result_frame,
                   text=self.t.get("result_skipped", n=skipped),
-                  font=("Segoe UI", 9)).pack(anchor="w")
+                  font=F_BODY).pack(anchor="w")
         ttk.Separator(self.result_frame, orient="horizontal").pack(fill="x", pady=4)
         for c in self.cats:
             if c["id"] not in out:
@@ -1507,7 +1521,7 @@ class CleanerApp:
                                   size=core.format_size(r["cleaned_bytes"]),
                                   removed=r["removed"], skipped=r["skipped"])
             ttk.Label(self.result_frame, text=line,
-                      font=("Segoe UI", 9)).pack(anchor="w")
+                      font=F_BODY).pack(anchor="w")
 
     # ══════════════════ SECURITY SCAN ══════════════════
     def start_security_scan(self):
@@ -1599,7 +1613,7 @@ class CleanerApp:
         if not group_name:
             ttk.Label(self.sec_detail_frame,
                       text=self.t.get("sec_detail_hint"),
-                      font=("Segoe UI", 9, "italic")).pack(anchor="w")
+                      font=F_CAPTION).pack(anchor="w")
             return
         items = []
         for gn, itms in self._sec_results:
@@ -1608,13 +1622,13 @@ class CleanerApp:
                 break
         self.sec_detail_frame.config(text=group_name)
         self.sec_detail_text = tk.Text(self.sec_detail_frame, height=10,
-                                       font=("Consolas", 9), wrap="word",
+                                       font=F_MONO, wrap="word",
                                        bg="#fafafa", state="normal")
         self.sec_detail_text.pack(fill="both", expand=True)
         for level, color in [("high", "#e74c3c"), ("medium", "#f39c12"),
                              ("low", "#3498db"), ("info", "#95a5a6"), ("ok", "#27ae60")]:
             self.sec_detail_text.tag_configure(level, foreground=color,
-                                               font=("Consolas", 9, "bold"))
+                                               font=F_MONO_B)
         for item_name, value, level in items:
             rl = security.risk_label_vi(level) if self.t.lang == "vi" else security.risk_label_en(level)
             self.sec_detail_text.insert("end", f"  {item_name}\n", level)
@@ -1870,11 +1884,11 @@ class CleanerApp:
             row = ttk.Frame(self.opt_disk_bars_frame)
             row.pack(fill="x", pady=1)
             ttk.Label(row, text=d["drive"], width=4,
-                      font=("Segoe UI", 9, "bold")).pack(side="left")
+                      font=F_SECTION).pack(side="left")
             bar = ttk.Progressbar(row, maximum=100, value=pct)
             bar.pack(side="left", padx=4, fill="x", expand=True)
             ttk.Label(row, text=f"{pct:.0f}%", width=5,
-                      font=("Segoe UI", 8)).pack(side="right")
+                      font=F_CAPTION).pack(side="right")
         c_drive = next((d for d in disks if "C:" in d.get("drive", "")), None)
         if c_drive:
             self.dash_disk_var.set(
