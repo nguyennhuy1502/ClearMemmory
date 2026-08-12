@@ -47,9 +47,8 @@ except ImportError:
 
 try:
     import sv_ttk
-    _HAS_SV_TTK = True
 except ImportError:
-    _HAS_SV_TTK = False
+    sv_ttk = None
 
 
 # ============================ RAM ============================
@@ -287,15 +286,6 @@ def _run_powershell(cmd, timeout=15):
         r = subprocess.run(
             ["powershell", "-NoProfile", "-Command", cmd],
             capture_output=True, text=True, timeout=timeout)
-        return r.returncode == 0
-    except Exception:
-        return False
-
-
-def _run_cmd(cmd_list, timeout=15):
-    """Chạy lệnh dạng list."""
-    try:
-        r = subprocess.run(cmd_list, capture_output=True, timeout=timeout)
         return r.returncode == 0
     except Exception:
         return False
@@ -704,8 +694,6 @@ BLOATWARE_SERVICES = {
     "ScDeviceEnum": "Smart Card Device Enumeration",
     "SCPolicySvc": "Smart Card Removal Policy",
 }
-
-_START_TYPE_LABEL = {1: "disabled", 2: "manual", 3: "automatic", 4: "disabled"}
 
 
 def _is_safe_service_name(name):

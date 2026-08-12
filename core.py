@@ -199,19 +199,6 @@ def scan_category(cat):
             "count": len(files), "note": "", "est": False}
 
 
-def scan_all(cats, progress=None):
-    """Quét danh sách category. progress(i, n, cid) tùy chọn để báo tiến độ."""
-    results = {}
-    n = len(cats)
-    for i, c in enumerate(cats):
-        if progress:
-            progress(i, n, c["id"])
-        results[c["id"]] = scan_category(c)
-    if progress:
-        progress(n, n, None)
-    return results
-
-
 # ============================ Dọn ============================
 # Defense-in-depth: các vùng HỆ THỐNG CỐT LÕI — dù path guard có lỗi,
 # KHÔNG bao giờ xóa file nằm trong các thư mục này (trừ các thư mục con
@@ -345,20 +332,6 @@ def clean_category(cat, scan_result, on_file=None):
 
     return {"category": cid, "cleaned_bytes": cleaned,
             "removed": removed, "skipped": skipped, "note": ""}
-
-
-def clean_all(cats, scan_results, progress=None, on_file=None):
-    """Dọn nhiều category. Trả về dict {cid: result}."""
-    out = {}
-    n = len(cats)
-    for i, c in enumerate(cats):
-        if progress:
-            progress(i, n, c["id"])
-        sr = scan_results.get(c["id"], {"files": [], "size": 0})
-        out[c["id"]] = clean_category(c, sr, on_file=on_file)
-    if progress:
-        progress(n, n, None)
-    return out
 
 
 # ============================ Recycle Bin ============================
