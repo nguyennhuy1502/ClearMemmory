@@ -24,9 +24,52 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import core, categories, security, optimizer
 
 _ERRLOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cleaner_error.log")
+_ERRLOG_MAX = 256 * 1024  # 256 KB cap
+
+
+def _is_admin():
+    """Kiểm tra tiến trình hiện tại có quyền Admin không (Windows)."""
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+def _auto_elevate():
+    """Nếu không phải Admin, tự re-launch với quyền Admin qua ShellExecuteW 'runas'.
+    Thoát tiến trình hiện tại (sẽ có tiến trình mới thay thế)."""
+    if _is_admin():
+        return
+    if "--no-elevate" in sys.argv:
+        return
+    try:
+        params = " ".join(f'"{a}"' if " " in a else a for a in sys.argv)
+        SW_SHOWNORMAL = 1
+        rc = ctypes.windll.shell32.ShellExecuteW(
+            None, "runas", sys.executable, params, None, SW_SHOWNORMAL)
+        if rc > 32:  # success
+            sys.exit(0)
+    except Exception:
+        pass
+
+
+def _rotate_errlog():
+    """Nếu error log quá lớn, giữ lại 50 KB cuối + reset."""
+    try:
+        if os.path.isfile(_ERRLOG) and os.path.getsize(_ERRLOG) > _ERRLOG_MAX:
+            with open(_ERRLOG, "rb") as f:
+                f.seek(-50 * 1024, 2)
+                tail = f.read()
+            with open(_ERRLOG, "wb") as f:
+                f.write(b"... [rotated] ...\n")
+                f.write(tail)
+    except Exception:
+        pass
+
 
 def _excepthook(exc_type, exc_value, tb):
     import traceback
+    _rotate_errlog()
     try:
         with open(_ERRLOG, "a", encoding="utf-8") as f:
             f.write("\n=== " + str(exc_value) + " ===\n")
@@ -38,6 +81,55 @@ def _excepthook(exc_type, exc_value, tb):
 sys.excepthook = _excepthook
 
 APP_TITLE = "ClearMemmory — Deep System Cleaner"
+
+
+def _self_check_cli():
+    """CLI smoke-test: kiểm tra imports + Admin + scan/clean cơ bản không cần GUI.
+    Chạy:  python cleaner.py --self-check [--no-elevate]
+    """
+    print(f"=== {APP_TITLE} — self-check ===")
+    print(f"Python  : {sys.version.split()[0]}")
+    print(f"OS      : Windows")
+    print(f"Admin   : {'YES' if _is_admin() else 'no'}")
+    print(f"Workdir : {os.getcwd()}")
+
+    # Import check
+    print("\n[1/4] Modules …")
+    for name in ["core", "categories", "security", "optimizer"]:
+        try:
+            __import__(name)
+            print(f"  OK  {name}")
+        except Exception as e:
+            print(f"  FAIL {name}: {e}")
+
+    # Categories
+    cat_list = getattr(categories, "_CATEGORIES",
+                       getattr(categories, "CATEGORIES", []))
+    print(f"\n[2/4] Categories: {len(cat_list)} định nghĩa")
+
+    # Critical-zone guard
+    print("\n[3/4] Path guard …")
+    sys32 = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32")
+    is_safe = core.is_within(sys32, sys32)
+    print(f"  System32 is_within(System32 root): {is_safe}")
+
+    # Scan 1 category nhẹ nhất
+    print("\n[4/4] Smoke-scan …")
+    try:
+        cid = "recycle_bin"
+        cat = next((c for c in cat_list if c["id"] == cid), None)
+        if cat:
+            res = core.scan_category(cat)
+            print(f"  {cid}: {res['count']} file(s), {res['size']} bytes")
+        else:
+            print(f"  (không tìm thấy {cid!r})")
+    except Exception as e:
+        print(f"  scan error: {e}")
+
+    print("\n=== self-check DONE ===")
+
+
+# ═══════════════════════════ MAIN ═══════════════════════════
 
 
 # ═══════════════════════════ Design tokens ═══════════════════════════
@@ -2149,6 +2241,14 @@ class CleanerApp:
 
 # ═══════════════════════════ MAIN ═══════════════════════════
 def main():
+    # CLI self-check (không mở GUI, không auto-elevate)
+    if "--self-check" in sys.argv:
+        _self_check_cli()
+        return
+
+    # Tự nâng quyền Admin nếu chưa có (trừ khi --no-elevate)
+    _auto_elevate()
+
     root = tk.Tk()
 
     # Áp dụng sv_ttk theme (Windows 11 Sun Valley)

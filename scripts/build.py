@@ -77,6 +77,7 @@ def build_exe():
         "--windowed",         # ẩn cửa sổ console (GUI app)
         "--name", APP_NAME,
         "--clean",
+        "--uac-admin",        # nhúng UAC manifest yêu cầu Admin (auto prompt)
         "--distpath", DIST,
         "--workpath", BUILD,
         "--specpath", ROOT,
