@@ -2,7 +2,7 @@
 REM run.bat — Click đôi để mở Deep System Cleaner
 REM Tự tìm Python, chạy UI (ẩn console bằng pythonw nếu có).
 setlocal
-cd /d "%~dp0"
+cd /d "%~dp0\..\src"
 
 REM Ưu tiên pythonw (ẩn cửa sổ console đen)
 where pythonw >nul 2>nul

@@ -18,9 +18,11 @@ import shutil
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EXE_SRC = os.path.join(HERE, "dist", "Cleaner.exe")
+ROOT = os.path.dirname(HERE)
+ASSETS = os.path.join(ROOT, "assets")
+EXE_SRC = os.path.join(ROOT, "dist", "Cleaner.exe")
 SETUP_SCRIPT = os.path.join(HERE, "setup_helper.py")
-OUTPUT_DIR = os.path.join(HERE, "installer_output")
+OUTPUT_DIR = os.path.join(ROOT, "installer_output")
 OUTPUT_EXE = os.path.join(OUTPUT_DIR, "Setup_ClearMemmory.exe")
 
 
@@ -52,10 +54,10 @@ def step2_build_setup_exe():
         sys.executable, "-m", "PyInstaller",
         "--noconfirm", "--onefile", "--windowed",
         "--name", "Setup_ClearMemmory",
-        "--icon", os.path.join(HERE, "app.ico"),
+        "--icon", os.path.join(ASSETS, "app.ico"),
         "--distpath", OUTPUT_DIR,
-        "--workpath", os.path.join(HERE, "build", "setup"),
-        "--specpath", os.path.join(HERE, "build", "setup"),
+        "--workpath", os.path.join(ROOT, "build", "setup"),
+        "--specpath", os.path.join(ROOT, "build", "setup"),
         SETUP_SCRIPT,
     ])
     if r.returncode != 0:

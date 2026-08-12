@@ -18,11 +18,14 @@ import shutil
 import subprocess
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+SRC = os.path.join(ROOT, "src")
+ASSETS = os.path.join(ROOT, "assets")
 APP_NAME = "Cleaner"
-ENTRY = os.path.join(HERE, "cleaner.py")
-ICON = os.path.join(HERE, "app.ico")
-DIST = os.path.join(HERE, "dist")
-BUILD = os.path.join(HERE, "build")
+ENTRY = os.path.join(SRC, "cleaner.py")
+ICON = os.path.join(ASSETS, "app.ico")
+DIST = os.path.join(ROOT, "dist")
+BUILD = os.path.join(ROOT, "build")
 SPEC = os.path.join(HERE, f"{APP_NAME}.spec")
 
 
@@ -74,6 +77,9 @@ def build_exe():
         "--windowed",         # ẩn cửa sổ console (GUI app)
         "--name", APP_NAME,
         "--clean",
+        "--distpath", DIST,
+        "--workpath", BUILD,
+        "--specpath", ROOT,
     ]
     if os.path.isfile(ver_file):
         args += ["--version-file", ver_file]

@@ -12,10 +12,30 @@ Có sẵn **file `.exe` chạy độc lập** (không cần cài Python).
 ### Dùng file .exe (khuyên dùng)
 Mở thư mục `dist/` → **click đôi `Cleaner.exe`**. Không cần cài đặt gì thêm.
 
+### Dùng file cài đặt
+Mở thư mục `installer_output/` → **click đôi `Setup_ClearMemmory.exe`** (Admin).
+
 ### Chạy từ source
 ```
 Cần Python 3 + tkinter (đã có sẵn mặc định).
-Click đôi run.bat        — hoặc —   python cleaner.py
+Click đôi assets/run.bat  — hoặc —   python src/cleaner.py
+```
+
+## 📂 Cấu trúc dự án
+```
+src/         — Mã nguồn chính (cleaner.py, core.py, categories.py, security.py, optimizer.py)
+scripts/     — Build scripts (build.py, build_installer*.py, installer.iss, setup_helper.py)
+tests/       — Unit tests + attack vectors (test_core/security/optimizer/attacks.py)
+assets/      — Tài nguyên (app.ico, run.bat)
+dist/        — Output PyInstaller (Cleaner.exe)
+installer_output/ — Output installer (Setup_ClearMemmory.exe)
+```
+
+### Build lại từ source
+```
+python scripts/build.py                  # → dist/Cleaner.exe
+python scripts/build_installer.py        # cần Inno Setup 6 → installer_output/Setup_ClearMemmory.exe
+python scripts/build_installer_noiscc.py # không cần Inno Setup
 ```
 
 > Để dọn được các mục hệ thống (Windows Temp, Logs, Memory Dump, DNS) và xem

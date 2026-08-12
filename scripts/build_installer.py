@@ -22,9 +22,10 @@ import subprocess
 import glob
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
 ISS = os.path.join(HERE, "installer.iss")
-EXE = os.path.join(HERE, "dist", "Cleaner.exe")
-OUTPUT_DIR = os.path.join(HERE, "installer_output")
+EXE = os.path.join(ROOT, "dist", "Cleaner.exe")
+OUTPUT_DIR = os.path.join(ROOT, "installer_output")
 
 # Các vị trí thường có ISCC.exe
 _ISCC_CANDIDATES = [

@@ -20,11 +20,11 @@ AppUpdatesURL={#URL}
 DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 UninstallDisplayIcon={app}\{#ExeName}
-OutputDir=installer_output
+OutputDir=..\installer_output
 OutputBaseFilename=Setup_ClearMemmory
 Compression=lzma2/ultra64
 SolidCompression=yes
-SetupIconFile=app.ico
+SetupIconFile=..\assets\app.ico
 PrivilegesRequired=admin
 WizardStyle=modern
 ArchitecturesAllowed=x64
@@ -41,7 +41,7 @@ Name: "startmenu"; Description: "{cm:CreateQuickLaunchIcon}"; Flags: checkedonce
 
 [Files]
 ; File exe duy nhất (onefile) — build từ build.py trước
-Source: "dist\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\{#ExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 ; Desktop shortcut

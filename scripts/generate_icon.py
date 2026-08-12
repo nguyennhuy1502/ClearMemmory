@@ -86,11 +86,14 @@ def create_icon():
     # hiển thị icon chất lượng cao, dùng append_images cho các size còn lại.
     # Sắp xếp lớn → nhỏ để ICO header đúng chuẩn.
     ordered = sorted(images, key=lambda im: -im.width)
-    ordered[0].save("app.ico", format="ICO",
+    import os
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _ico = os.path.join(_root, "assets", "app.ico")
+    os.makedirs(os.path.dirname(_ico), exist_ok=True)
+    ordered[0].save(_ico, format="ICO",
                     sizes=[(s, s) for s in sizes],
                     append_images=ordered[1:])
-    import os
-    print(f"Đã tạo app.ico ({os.path.getsize('app.ico')} bytes, {len(sizes)} kích thước)")
+    print(f"Đã tạo {_ico} ({os.path.getsize(_ico)} bytes, {len(sizes)} kích thước)")
 
 
 if __name__ == "__main__":
